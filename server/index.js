@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const ytdlp = require('yt-dlp-exec');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const AdmZip = require('adm-zip');
@@ -11,25 +10,50 @@ const os = require('os');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const { YOUTUBE_DL_PATH } = require('yt-dlp-exec/src/constants');
-const ytdlpBin = fs.existsSync(YOUTUBE_DL_PATH) ? YOUTUBE_DL_PATH : 'yt-dlp';
+// On Linux (Render) use pip-installed yt-dlp from PATH; on Windows use the npm-bundled binary
+let ytdlpBin = 'yt-dlp';
+if (process.platform === 'win32') {
+  try {
+    const { YOUTUBE_DL_PATH } = require('yt-dlp-exec/src/constants');
+    if (fs.existsSync(YOUTUBE_DL_PATH)) ytdlpBin = YOUTUBE_DL_PATH;
+  } catch (_) {}
+}
 
 const YTDLP_BASE_ARGS = ['--js-runtimes', `node:${process.execPath}`];
-// Shared options for ytdlp() wrapper calls
-const YTDLP_OPTS = { jsRuntimes: `node:${process.execPath}` };
 
 // Write cookies from env var to a temp file so yt-dlp can authenticate with YouTube
 const COOKIES_FILE = path.join(os.tmpdir(), 'yt_cookies.txt');
 if (process.env.YOUTUBE_COOKIES) {
   fs.writeFileSync(COOKIES_FILE, process.env.YOUTUBE_COOKIES);
   YTDLP_BASE_ARGS.push('--cookies', COOKIES_FILE);
-  YTDLP_OPTS.cookies = COOKIES_FILE;
   console.log('YouTube cookies loaded.');
 }
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Helper: fetch video metadata via yt-dlp --dump-single-json
+function fetchVideoInfo(url) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ytdlpBin, [
+      url, ...YTDLP_BASE_ARGS,
+      '--dump-single-json', '--no-warnings', '--skip-download', '--no-check-certificates',
+    ]);
+    let out = '';
+    let err = '';
+    proc.stdout.on('data', d => { out += d; });
+    proc.stderr.on('data', d => { err += d; process.stderr.write(d); });
+    proc.on('error', reject);
+    proc.on('close', code => {
+      if (code !== 0) reject(new Error(err.trim() || `yt-dlp exited with code ${code}`));
+      else {
+        try { resolve(JSON.parse(out)); }
+        catch (e) { reject(new Error('Failed to parse yt-dlp output')); }
+      }
+    });
+  });
+}
 
 // Helper: download to temp file via yt-dlp
 function downloadToTmp(url, extraArgs, tmpFile) {
@@ -67,13 +91,7 @@ app.get('/api/info', async (req, res) => {
   if (!url) return res.status(400).json({ error: 'URL is required' });
 
   try {
-    const info = await ytdlp(url, {
-      dumpSingleJson: true,
-      noWarnings: true,
-      skipDownload: true,
-      noCheckCertificates: true,
-      ...YTDLP_OPTS,
-    });
+    const info = await fetchVideoInfo(url);
 
     const qualities = [
       ...new Set(
@@ -104,12 +122,7 @@ app.get('/api/download', async (req, res) => {
   if (!url || !format) return res.status(400).json({ error: 'URL and format are required' });
 
   try {
-    const info = await ytdlp(url, {
-      dumpSingleJson: true,
-      noWarnings: true,
-      skipDownload: true,
-      ...YTDLP_OPTS,
-    });
+    const info = await fetchVideoInfo(url);
 
     const title = (info.title || 'video').replace(/[^\w\s\-ก-๙]/g, '').trim() || 'video';
     const safeTitle = encodeURIComponent(title);
