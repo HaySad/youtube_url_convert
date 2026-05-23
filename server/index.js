@@ -16,6 +16,14 @@ const ytdlpBin = fs.existsSync(YOUTUBE_DL_PATH) ? YOUTUBE_DL_PATH : 'yt-dlp';
 
 const YTDLP_BASE_ARGS = ['--js-runtimes', `node:${process.execPath}`];
 
+// Write cookies from env var to a temp file so yt-dlp can authenticate with YouTube
+const COOKIES_FILE = path.join(os.tmpdir(), 'yt_cookies.txt');
+if (process.env.YOUTUBE_COOKIES) {
+  fs.writeFileSync(COOKIES_FILE, process.env.YOUTUBE_COOKIES);
+  YTDLP_BASE_ARGS.push('--cookies', COOKIES_FILE);
+  console.log('YouTube cookies loaded.');
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -58,7 +66,6 @@ app.get('/api/info', async (req, res) => {
     const info = await ytdlp(url, {
       dumpSingleJson: true,
       noWarnings: true,
-      noCallHome: true,
       skipDownload: true,
       noCheckCertificates: true,
       jsRuntimes: `node:${process.execPath}`,
