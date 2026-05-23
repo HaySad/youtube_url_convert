@@ -2,7 +2,7 @@ services:
   - type: web
     name: youtube-downloader-api
     runtime: node
-    buildCommand: npm install
+    buildCommand: npm install && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ./node_modules/yt-dlp-exec/bin/yt-dlp && chmod +x ./node_modules/yt-dlp-exec/bin/yt-dlp
     startCommand: node server/index.js
     plan: free
     envVars:

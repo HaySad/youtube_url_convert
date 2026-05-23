@@ -11,9 +11,9 @@ const os = require('os');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const { YOUTUBE_DL_PATH: ytdlpBin } = require('yt-dlp-exec/src/constants');
+const { YOUTUBE_DL_PATH } = require('yt-dlp-exec/src/constants');
+const ytdlpBin = fs.existsSync(YOUTUBE_DL_PATH) ? YOUTUBE_DL_PATH : 'yt-dlp';
 
-// Use Node.js (already installed) as JS runtime for yt-dlp n-challenge solving
 const YTDLP_BASE_ARGS = ['--js-runtimes', `node:${process.execPath}`];
 
 const app = express();
