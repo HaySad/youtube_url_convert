@@ -10,19 +10,44 @@ const os = require('os');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// Prefer a project-local binary (downloaded by render.yaml build step on Linux).
-// Fall back to npm-bundled binary on Windows for local dev.
 const LOCAL_BIN = path.join(__dirname, '..', 'yt-dlp');
 let ytdlpBin = 'yt-dlp';
-if (fs.existsSync(LOCAL_BIN)) {
-  ytdlpBin = LOCAL_BIN;
-} else if (process.platform === 'win32') {
-  try {
-    const { YOUTUBE_DL_PATH } = require('yt-dlp-exec/src/constants');
-    if (fs.existsSync(YOUTUBE_DL_PATH)) ytdlpBin = YOUTUBE_DL_PATH;
-  } catch (_) {}
+
+function downloadYtDlp(dest) {
+  const https = require('https');
+  return new Promise((resolve, reject) => {
+    const follow = (url) => {
+      https.get(url, (res) => {
+        if ([301, 302, 307, 308].includes(res.statusCode)) { follow(res.headers.location); return; }
+        if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode} downloading yt-dlp`)); return; }
+        const tmp = dest + '.tmp';
+        const file = fs.createWriteStream(tmp);
+        res.pipe(file);
+        file.on('finish', () => file.close(() => {
+          fs.renameSync(tmp, dest);
+          fs.chmodSync(dest, 0o755);
+          console.log('yt-dlp downloaded to', dest);
+          resolve(dest);
+        }));
+        file.on('error', (e) => { fs.unlink(tmp, () => {}); reject(e); });
+      }).on('error', reject);
+    };
+    follow('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux');
+  });
 }
-console.log('yt-dlp binary:', ytdlpBin);
+
+async function resolveYtDlpBin() {
+  if (process.platform === 'win32') {
+    try {
+      const { YOUTUBE_DL_PATH } = require('yt-dlp-exec/src/constants');
+      if (fs.existsSync(YOUTUBE_DL_PATH)) return YOUTUBE_DL_PATH;
+    } catch (_) {}
+    return 'yt-dlp';
+  }
+  if (fs.existsSync(LOCAL_BIN)) return LOCAL_BIN;
+  console.log('yt-dlp not found, downloading standalone Linux binary...');
+  return downloadYtDlp(LOCAL_BIN);
+}
 
 const YTDLP_BASE_ARGS = ['--js-runtimes', `node:${process.execPath}`];
 
@@ -255,7 +280,14 @@ app.get('/api/download', async (req, res) => {
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3001;
-  app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+  resolveYtDlpBin().then(bin => {
+    ytdlpBin = bin;
+    console.log('yt-dlp binary:', ytdlpBin);
+    app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+  }).catch(err => {
+    console.error('Failed to resolve yt-dlp binary:', err.message);
+    process.exit(1);
+  });
 }
 
 module.exports = app;
