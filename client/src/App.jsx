@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import './App.css';
 
-const API = '/api';
+const API = import.meta.env.VITE_API_URL || '/api';
 
 function formatDuration(seconds) {
   const m = Math.floor(seconds / 60);

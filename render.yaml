@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: youtube-downloader-api
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server/index.js
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
