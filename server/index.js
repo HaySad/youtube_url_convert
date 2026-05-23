@@ -10,14 +10,19 @@ const os = require('os');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// On Linux (Render) use pip-installed yt-dlp from PATH; on Windows use the npm-bundled binary
+// Prefer a project-local binary (downloaded by render.yaml build step on Linux).
+// Fall back to npm-bundled binary on Windows for local dev.
+const LOCAL_BIN = path.join(__dirname, '..', 'yt-dlp');
 let ytdlpBin = 'yt-dlp';
-if (process.platform === 'win32') {
+if (fs.existsSync(LOCAL_BIN)) {
+  ytdlpBin = LOCAL_BIN;
+} else if (process.platform === 'win32') {
   try {
     const { YOUTUBE_DL_PATH } = require('yt-dlp-exec/src/constants');
     if (fs.existsSync(YOUTUBE_DL_PATH)) ytdlpBin = YOUTUBE_DL_PATH;
   } catch (_) {}
 }
+console.log('yt-dlp binary:', ytdlpBin);
 
 const YTDLP_BASE_ARGS = ['--js-runtimes', `node:${process.execPath}`];
 
