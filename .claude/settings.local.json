@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(node -e \"const m = require\\('yt-dlp-exec'\\); console.log\\(m.toString\\(\\).slice\\(0,300\\)\\)\")"
+    ]
+  }
+}
