@@ -15,12 +15,15 @@ const { YOUTUBE_DL_PATH } = require('yt-dlp-exec/src/constants');
 const ytdlpBin = fs.existsSync(YOUTUBE_DL_PATH) ? YOUTUBE_DL_PATH : 'yt-dlp';
 
 const YTDLP_BASE_ARGS = ['--js-runtimes', `node:${process.execPath}`];
+// Shared options for ytdlp() wrapper calls
+const YTDLP_OPTS = { jsRuntimes: `node:${process.execPath}` };
 
 // Write cookies from env var to a temp file so yt-dlp can authenticate with YouTube
 const COOKIES_FILE = path.join(os.tmpdir(), 'yt_cookies.txt');
 if (process.env.YOUTUBE_COOKIES) {
   fs.writeFileSync(COOKIES_FILE, process.env.YOUTUBE_COOKIES);
   YTDLP_BASE_ARGS.push('--cookies', COOKIES_FILE);
+  YTDLP_OPTS.cookies = COOKIES_FILE;
   console.log('YouTube cookies loaded.');
 }
 
@@ -68,7 +71,7 @@ app.get('/api/info', async (req, res) => {
       noWarnings: true,
       skipDownload: true,
       noCheckCertificates: true,
-      jsRuntimes: `node:${process.execPath}`,
+      ...YTDLP_OPTS,
     });
 
     const qualities = [
@@ -104,7 +107,7 @@ app.get('/api/download', async (req, res) => {
       dumpSingleJson: true,
       noWarnings: true,
       skipDownload: true,
-      jsRuntimes: `node:${process.execPath}`,
+      ...YTDLP_OPTS,
     });
 
     const title = (info.title || 'video').replace(/[^\w\s\-ก-๙]/g, '').trim() || 'video';
