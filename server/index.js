@@ -51,12 +51,13 @@ function audioToMp3Tmp(url, bitrate, tmpFile) {
       url, ...YTDLP_BASE_ARGS,
       '-f', 'bestaudio', '--no-playlist', '-o', '-',
     ]);
-    ffmpeg(ytdlpProc.stdout)
+    const cmd = ffmpeg(ytdlpProc.stdout)
       .audioBitrate(bitrate)
       .format('mp3')
-      .on('error', err => reject(err))
-      .on('end', () => resolve(tmpFile))
-      .save(tmpFile);
+      .output(tmpFile);
+    cmd.on('error', reject);
+    cmd.on('end', () => resolve(tmpFile));
+    cmd.run();
     ytdlpProc.on('error', reject);
   });
 }
@@ -99,7 +100,7 @@ app.get('/api/info', async (req, res) => {
 });
 
 app.get('/api/download', async (req, res) => {
-  const { url, format, quality } = req.query;
+  const { url, format, quality, audioQuality, videoQuality } = req.query;
   if (!url || !format) return res.status(400).json({ error: 'URL and format are required' });
 
   try {
@@ -187,13 +188,26 @@ app.get('/api/download', async (req, res) => {
       const tmpMp4 = path.join(os.tmpdir(), `ytdl_pv_${ts}.mp4`);
       const cleanup = () => { fs.unlink(tmpMp3, () => {}); fs.unlink(tmpMp4, () => {}); };
 
-      console.log('Maichart: downloading track.mp3 + pv.mp4 in parallel...');
+      // Flush headers immediately so Render's proxy doesn't timeout waiting for a response
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeTitle}.zip`);
+      res.flushHeaders();
+
+      const bitrateMap = { '320kbps': '320k', '192kbps': '192k', '128kbps': '128k' };
+      const audioBitrate = bitrateMap[audioQuality] || '320k';
+      const heightMatch = (videoQuality || 'best').match(/(\d+)/);
+      const videoHeight = heightMatch ? heightMatch[1] : null;
+      const videoFormatSelector = videoHeight
+        ? `bestvideo[height<=${videoHeight}]+bestaudio/best[height<=${videoHeight}]/best`
+        : 'bestvideo+bestaudio/best';
+
+      console.log(`Maichart: audio=${audioBitrate}, video=${videoQuality || 'best'}`);
 
       try {
         await Promise.all([
-          audioToMp3Tmp(url, '320k', tmpMp3),
+          audioToMp3Tmp(url, audioBitrate, tmpMp3),
           downloadToTmp(url, [
-            '-f', 'bestvideo+bestaudio/best',
+            '-f', videoFormatSelector,
             '--no-playlist',
             '--merge-output-format', 'mp4',
             '--ffmpeg-location', path.dirname(ffmpegPath),
@@ -201,20 +215,15 @@ app.get('/api/download', async (req, res) => {
         ]);
       } catch (err) {
         cleanup();
-        if (!res.headersSent) res.status(500).json({ error: err.message });
+        res.end();
         return;
       }
 
-      // Build zip in memory (adm-zip) then send
       const zip = new AdmZip();
       zip.addLocalFile(tmpMp3, '', 'track.mp3');
       zip.addLocalFile(tmpMp4, '', 'pv.mp4');
       const zipBuf = zip.toBuffer();
       cleanup();
-
-      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeTitle}.zip`);
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Length', zipBuf.length);
       res.end(zipBuf);
 
     } else {

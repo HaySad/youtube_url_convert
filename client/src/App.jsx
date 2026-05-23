@@ -15,54 +15,87 @@ const FORMATS = [
   { id: 'maichart', label: 'Maichart', desc: 'track.mp3 + pv.mp4 (.zip)' },
 ];
 
+const EXT = { mp3: 'mp3', mp4: 'mp4', maichart: 'zip' };
+const STATE = { IDLE: 'idle', LOADING: 'loading', DONE: 'done' };
+
 export default function App() {
   const [url, setUrl] = useState('');
   const [info, setInfo] = useState(null);
   const [format, setFormat] = useState('mp3');
   const [quality, setQuality] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [maiAudio, setMaiAudio] = useState('320kbps');
+  const [maiVideo, setMaiVideo] = useState('');
+  const [fetching, setFetching] = useState(false);
+  const [dlState, setDlState] = useState(STATE.IDLE);
   const [error, setError] = useState('');
 
   const fetchInfo = async () => {
     if (!url.trim()) return;
-    setLoading(true);
+    setFetching(true);
     setError('');
     setInfo(null);
+    setDlState(STATE.IDLE);
     try {
       const res = await fetch(`${API}/info?url=${encodeURIComponent(url)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setInfo(data);
       setQuality(data.formats.mp3[0]);
+      setMaiVideo(data.formats.mp4[0] || '1080p');
     } catch (e) {
       setError(e.message);
     } finally {
-      setLoading(false);
+      setFetching(false);
     }
   };
 
   const handleFormatChange = (f) => {
     setFormat(f);
+    setDlState(STATE.IDLE);
     if (info) {
       if (f === 'mp3') setQuality(info.formats.mp3[0]);
       else if (f === 'mp4') setQuality(info.formats.mp4[0] || '1080p');
-      else setQuality('');
     }
   };
 
-  const handleDownload = () => {
-    if (!info || !url) return;
-    setDownloading(true);
+  const handleDownload = async () => {
+    if (!info || !url || dlState === STATE.LOADING) return;
+    setDlState(STATE.LOADING);
     setError('');
-    const params = new URLSearchParams({ url, format, quality });
-    const a = document.createElement('a');
-    a.href = `${API}/download?${params}`;
-    a.download = '';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => setDownloading(false), format === 'maichart' ? 10000 : 3000);
+
+    try {
+      const params = new URLSearchParams({ url, format, quality });
+      if (format === 'maichart') {
+        params.set('audioQuality', maiAudio);
+        params.set('videoQuality', maiVideo);
+      }
+
+      const res = await fetch(`${API}/download?${params}`);
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Server error ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const ext = EXT[format];
+      const filename = `${(info.title || 'video').replace(/[^\w\s-]/g, '').trim() || 'video'}.${ext}`;
+
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+
+      setDlState(STATE.DONE);
+      setTimeout(() => setDlState(STATE.IDLE), 4000);
+    } catch (e) {
+      setError(e.message);
+      setDlState(STATE.IDLE);
+    }
   };
 
   const qualityOptions =
@@ -70,10 +103,13 @@ export default function App() {
     format === 'mp4' ? (info?.formats.mp4 ?? []) :
     [];
 
-  const downloadLabel =
-    format === 'mp3' ? 'Download MP3' :
-    format === 'mp4' ? 'Download MP4' :
-    'Download Maichart (.zip)';
+  const isLoading = dlState === STATE.LOADING;
+
+  const btnClass = [
+    'btn-download',
+    format === 'maichart' ? 'maichart' : '',
+    dlState === STATE.DONE ? 'done' : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <div className="app">
@@ -93,8 +129,8 @@ export default function App() {
             onKeyDown={e => e.key === 'Enter' && fetchInfo()}
             className="url-input"
           />
-          <button onClick={fetchInfo} disabled={loading || !url.trim()} className="btn-fetch">
-            {loading ? <span className="spinner" /> : 'Search'}
+          <button onClick={fetchInfo} disabled={fetching || !url.trim()} className="btn-fetch">
+            {fetching ? <span className="spinner" /> : 'Search'}
           </button>
         </div>
 
@@ -120,6 +156,7 @@ export default function App() {
                   className={`tab ${format === f.id ? 'active' : ''}`}
                   onClick={() => handleFormatChange(f.id)}
                   title={f.desc}
+                  disabled={isLoading}
                 >
                   {f.label}
                 </button>
@@ -127,19 +164,55 @@ export default function App() {
             </div>
 
             {format === 'maichart' && (
-              <div className="maichart-info">
-                <div className="maichart-icon">ZIP</div>
-                <div>
-                  <strong>track.mp3</strong> — Audio at 320kbps<br />
-                  <strong>pv.mp4</strong> — Best available video quality
+              <>
+                <div className="maichart-info">
+                  <div className="maichart-icon">ZIP</div>
+                  <div>
+                    <strong>track.mp3</strong> + <strong>pv.mp4</strong> packaged as a .zip file
+                  </div>
                 </div>
-              </div>
+
+                <div className="quality-row">
+                  <div className="quality-group">
+                    <label>Audio quality</label>
+                    <select
+                      value={maiAudio}
+                      onChange={e => setMaiAudio(e.target.value)}
+                      className="select"
+                      disabled={isLoading}
+                    >
+                      {(info.formats.mp3 ?? []).map(q => (
+                        <option key={q} value={q}>{q}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="quality-group">
+                    <label>Video quality</label>
+                    <select
+                      value={maiVideo}
+                      onChange={e => setMaiVideo(e.target.value)}
+                      className="select"
+                      disabled={isLoading}
+                    >
+                      {(info.formats.mp4 ?? []).map(q => (
+                        <option key={q} value={q}>{q}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </>
             )}
 
-            {qualityOptions.length > 0 && (
+            {qualityOptions.length > 0 && format !== 'maichart' && (
               <div className="quality-group">
                 <label>Quality</label>
-                <select value={quality} onChange={e => setQuality(e.target.value)} className="select">
+                <select
+                  value={quality}
+                  onChange={e => setQuality(e.target.value)}
+                  className="select"
+                  disabled={isLoading}
+                >
                   {qualityOptions.map(q => (
                     <option key={q} value={q}>{q}</option>
                   ))}
@@ -147,15 +220,26 @@ export default function App() {
               </div>
             )}
 
-            <button
-              onClick={handleDownload}
-              disabled={downloading}
-              className={`btn-download ${format === 'maichart' ? 'maichart' : ''}`}
-            >
-              {downloading
-                ? <><span className="spinner" /> Downloading{format === 'maichart' ? ' (this may take a moment...)' : ''}...</>
-                : downloadLabel
-              }
+            <button onClick={handleDownload} disabled={isLoading} className={btnClass}>
+              {dlState === STATE.LOADING && (
+                <>
+                  <span className="spinner" />
+                  {format === 'maichart'
+                    ? 'Processing — downloading 2 files and zipping...'
+                    : 'Preparing your file...'}
+                </>
+              )}
+              {dlState === STATE.DONE && (
+                <>
+                  <span className="checkmark" />
+                  File saved to Downloads
+                </>
+              )}
+              {dlState === STATE.IDLE && (
+                format === 'mp3' ? 'Download MP3' :
+                format === 'mp4' ? 'Download MP4' :
+                'Download Maichart (.zip)'
+              )}
             </button>
           </div>
         )}
